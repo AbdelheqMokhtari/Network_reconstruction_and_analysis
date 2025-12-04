@@ -85,8 +85,6 @@ print(amat_true[1:7, 1:7])
 ## 1.e Building directed graph using igraph 
 
 ```{r}
-library(igraph)
-
 # 1. Build the directed igraph object from the adjacency matrix
 # 'mode = "directed"' ensures the arrows point from parent to child
 g_true <- graph_from_adjacency_matrix(amat_true, mode = "directed")
@@ -109,5 +107,192 @@ plot(g_true,
      edge.color = "darkgray",         # softer edge color
      edge.curved = 0.1                # Slight curve to make connections distinct
 )
+```
+# 2. Score-based method
+
+## 2.1 
+
+```{r}
+# 2. Load the insurance dataset
+data(insurance)
+
+head(insurance)
+```
+# 2.2
+
+```{r}
+# 1. Reconstruct the network using Hill-Climbing
+# 'hc' stands for Hill-Climbing, a score-based structure learning algorithm
+res_hc <- hc(insurance)
+
+# 2. Check the class of the returned object
+# Expected: "bn"
+class(res_hc)
+
+# 3. See the content
+# This will show the learned edges (arcs) and the score of the network
+print(res_hc)
+```
+
+# 2.3 
+
+```{r}
+# 1. Get the adjacency matrix for the Hill-Climbing result
+amat_hc <- bnlearn::amat(res_hc)
+
+# 2. Check the dimensions
+# It should still be 27x27 (same nodes as the original data)
+dim(amat_hc)
+
+# 3. View the first few rows/cols to check the structure
+print(amat_hc[1:7, 1:7])
+```
+
+# 2.4 
+
+```{r}
+library(igraph)
+
+# 1. Build the directed igraph object
+# We use the adjacency matrix 'amat_hc' from the previous step
+g_hc <- graph_from_adjacency_matrix(amat_hc, mode = "directed")
+
+# 2. Plot the network
+# We use similar parameters to the Ground Truth plot for easy visual comparison
+plot(g_hc, 
+     layout = layout_with_graphopt,   # Good layout for spreading nodes
+     main = "Reconstructed Network (Hill-Climbing)",
+     
+     # Node styling
+     vertex.color = "lightgreen",     # Different color to distinguish from Truth
+     vertex.frame.color = "darkgreen",
+     vertex.size = 10,
+     vertex.label.cex = 0.7,
+     vertex.label.color = "black",
+     
+     # Edge styling
+     edge.arrow.size = 0.4,
+     edge.color = "gray50",
+     edge.curved = 0.1
+)
+```
+
+# 2.5 
+
+```{r}
+# 1. Convert Adjacency Matrices to Skeletons (Undirected)
+# We check if an edge exists in either direction (A->B OR B->A)
+# 't()' is the transpose function.
+skel_true <- (amat_true + t(amat_true)) > 0
+skel_hc   <- (amat_hc + t(amat_hc)) > 0
+
+# 2. Select only the Upper Triangle
+# Since the matrices are now symmetric, we only look at one half 
+# to avoid double-counting edges.
+ut <- upper.tri(skel_true)
+
+# 3. Calculate Counts (TP, FP, FN)
+TP <- sum(skel_hc[ut] & skel_true[ut])   # Edge in BOTH
+FP <- sum(skel_hc[ut] & !skel_true[ut])  # Edge in HC only
+FN <- sum(!skel_hc[ut] & skel_true[ut])  # Edge in Truth only
+
+# 4. Compute Metrics
+precision <- TP / (TP + FP)
+recall    <- TP / (TP + FN)
+fscore    <- 2 * (precision * recall) / (precision + recall)
+
+# 5. Print Results
+cat("True Positives (TP):", TP, "\n")
+cat("False Positives (FP):", FP, "\n")
+cat("False Negatives (FN):", FN, "\n")
+cat("----------------------------\n")
+cat("Precision:", round(precision, 4), "\n")
+cat("Recall:   ", round(recall, 4), "\n")
+cat("F-score:  ", round(fscore, 4), "\n")
+```
+
+# 2.6 
+
+```{r}
+# 1. Define the edge colors based on validity
+# We iterate through every edge in the learned graph (g_hc)
+edge_list_hc <- as_edgelist(g_hc)
+
+# Initialize a vector of colors (default to gray/correct)
+edge_colors <- rep("gray50", nrow(edge_list_hc))
+edge_widths <- rep(1, nrow(edge_list_hc))
+
+# 2. Check each edge against the Ground Truth Skeleton
+for (i in 1:nrow(edge_list_hc)) {
+  node_a <- edge_list_hc[i, 1]
+  node_b <- edge_list_hc[i, 2]
+  
+  # Check if this connection exists in the truth (undirected check)
+  # skel_true was defined in the previous step
+  if (skel_true[node_a, node_b] == 0) {
+    # If not in truth, it is a False Positive -> Color RED
+    edge_colors[i] <- "red"
+    edge_widths[i] <- 2.5  # Make it thicker
+  }
+}
+
+# 3. Assign attributes to the graph
+E(g_hc)$color <- edge_colors
+E(g_hc)$width <- edge_widths
+
+# 4. Plot the network with highlighted FPs
+plot(g_hc, 
+     layout = layout_with_graphopt, 
+     main = "Hill-Climbing: False Positives (Red)",
+     
+     # Node styling
+     vertex.color = "white",
+     vertex.frame.color = "black",
+     vertex.size = 8,
+     vertex.label.cex = 0.6,
+     vertex.label.color = "black",
+     
+     # Edge styling (arrow size)
+     edge.arrow.size = 0.4
+)
+
+# Add a simple legend
+legend("topleft", legend=c("Correct (TP)", "False Positive (FP)"), 
+       col=c("gray50", "red"), lty=1, lwd=c(1, 2.5), cex=0.8)
+```
+# 2.g 
+
+```{r}
+# 1. Calculate Structural Hamming Distance (SHD)
+# This compares the learned DAG (res_hc) directly to the ground truth (ground_truth_dag)
+# Use bnlearn::shd to avoid conflict with pcalg
+dist_shd <- bnlearn::shd(res_hc, ground_truth_dag)
+
+cat("Structural Hamming Distance (SHD):", dist_shd, "\n")
+# Note: Lower is better. 0 means a perfect match.
+
+# 2. Compare using CPDAGs (Equivalence Classes)
+# This is often considered a "fairer" comparison for structure learning
+cpdag_true <- cpdag(ground_truth_dag)
+cpdag_hc   <- cpdag(res_hc)
+
+dist_shd_cpdag <- bnlearn::shd(cpdag_hc, cpdag_true)
+cat("SHD between Equivalence Classes:", dist_shd_cpdag, "\n")
+
+# 3. Simple Orientation Count (Manual Calculation)
+# If you want to manually count how many edges have the WRONG orientation 
+# (but correct skeleton):
+amat_true <- amat(ground_truth_dag)
+amat_hc   <- amat(res_hc)
+
+# Find edges that exist in both (Common Skeleton)
+common_skeleton <- (amat_true == 1 | t(amat_true) == 1) & 
+                   (amat_hc == 1   | t(amat_hc) == 1)
+
+# Check which of these common edges are flipped
+# (Exists in HC as A->B, but in Truth as B->A)
+reversed_edges <- sum(amat_hc == 1 & t(amat_true) == 1 & common_skeleton)
+
+cat("Number of edges with reversed orientation:", reversed_edges, "\n")
 ```
 
