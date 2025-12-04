@@ -1,0 +1,113 @@
+---
+title: "Solution_network"
+output: html_document
+---
+
+# 1.Preliminaries
+
+## 1.1 Install Packages 
+```{r}
+# 1. List of standard CRAN packages
+cran_packages <- c("bnlearn", "igraph", "miic")
+
+# 2. Install and load CRAN packages
+for (pkg in cran_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# 3. Install and load pcalg (via Bioconductor to manage dependencies)
+if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+if (!require("pcalg", quietly = TRUE)) BiocManager::install("pcalg")
+
+# 4. Load pcalg
+library(pcalg)
+
+# Verify everything is loaded
+print("All packages loaded successfully!")
+```
+## 1.2 Create instance 
+
+```{r}
+
+# 1. Define the model string (Source: bnlearn::insurance help documentation)
+# This string represents the "Ground Truth" structure: [Node|Parents]
+model_string <- paste0(
+  "[Age][Mileage][SocioEcon|Age][GoodStudent|Age:SocioEcon]",
+  "[RiskAversion|Age:SocioEcon][OtherCar|SocioEcon]",
+  "[VehicleYear|SocioEcon:RiskAversion][MakeModel|SocioEcon:RiskAversion]",
+  "[SeniorTrain|Age:RiskAversion][HomeBase|SocioEcon:RiskAversion]",
+  "[AntiTheft|SocioEcon:RiskAversion][RuggedAuto|VehicleYear:MakeModel]",
+  "[Antilock|VehicleYear:MakeModel][DrivingSkill|Age:SeniorTrain]",
+  "[CarValue|VehicleYear:MakeModel:Mileage][Airbag|VehicleYear:MakeModel]",
+  "[DrivQuality|RiskAversion:DrivingSkill][Theft|CarValue:HomeBase:AntiTheft]",
+  "[Cushioning|RuggedAuto:Airbag][DrivHist|RiskAversion:DrivingSkill]",
+  "[Accident|Antilock:Mileage:DrivQuality][ThisCarDam|RuggedAuto:Accident]",
+  "[OtherCarCost|Accident][MedCost|Age:Accident:Cushioning]",
+  "[ILiCost|Accident][ThisCarCost|ThisCarDam:Theft:CarValue]",
+  "[PropCost|ThisCarCost:OtherCarCost]"
+)
+
+# 2. Create the network object from the string
+ground_truth_dag <- model2network(model_string)
+
+# 3. (Optional) Verify the creation
+print(ground_truth_dag)
+```
+
+## 1.c the Content of the object (ground_truth_dag)
+
+```{r}
+# 1. Check the class of the object
+# Expected output: "bn" (Bayesian Network)
+class(ground_truth_dag)
+
+# 2. See the content
+# This displays the number of nodes, arcs, and the model string
+print(ground_truth_dag)
+```
+
+## 1.d 
+
+```{r}
+# 1. Get the adjacency matrix
+amat_true <- bnlearn::amat(ground_truth_dag)
+
+# 2. Check the dimensions 
+dim(amat_true)
+
+# 3. View the first few rows and columns to inspect the structure
+print(amat_true[1:7, 1:7])
+```
+
+## 1.e Building directed graph using igraph 
+
+```{r}
+library(igraph)
+
+# 1. Build the directed igraph object from the adjacency matrix
+# 'mode = "directed"' ensures the arrows point from parent to child
+g_true <- graph_from_adjacency_matrix(amat_true, mode = "directed")
+
+# 2. Generate a "Nice" Plot
+# We use 'layout_with_graphopt' which effectively un-clutters medium-sized networks
+plot(g_true, 
+     layout = layout_with_graphopt,   # A force-directed layout that spreads nodes well
+     main = "Ground Truth: Insurance Network",
+     
+     # Node styling
+     vertex.color = "lightblue",      # Fill color
+     vertex.frame.color = "white",    # Border color
+     vertex.size = 10,                # Node size (adjusted for 27 nodes)
+     vertex.label.cex = 0.7,          # Label font size (smaller to fit)
+     vertex.label.color = "black",    # Label color
+     
+     # Edge styling
+     edge.arrow.size = 0.4,           # Smaller arrows for cleaner look
+     edge.color = "darkgray",         # softer edge color
+     edge.curved = 0.1                # Slight curve to make connections distinct
+)
+```
+
