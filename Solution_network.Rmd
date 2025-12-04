@@ -430,10 +430,183 @@ cat("Precision:", round(precision, 4), "\n")
 cat("Recall:   ", round(recall, 4), "\n")
 cat("F-score:  ", round(fscore, 4), "\n")
 ```
+1. Overall Assessment: "Clean but Incomplete" The most striking result is the Precision of 1.0 (100%).
+
+    False Positives (FP) = 0: This is an exceptional result. Every single edge the algorithm found actually exists in the Ground Truth. The PC algorithm did not "hallucinate" any incorrect connections.
+
+    Implication: You can trust the edges that are present implicitly. If the PC algorithm draws a line between two nodes, that relationship is almost certainly real.
+
+2. The Trade-off: Low Recall
+
+    False Negatives (FN) = 24 (Recall ~53%): The algorithm missed nearly half of the true connections in the network.
+
+    Cause: The PC algorithm is conservative. It performs statistical tests (conditional independence tests) to verify edges. If the data is noisy or the relationship between two variables is weak, the statistical test fails to reject independence, and the algorithm conservatively removes the edge. It prefers to miss a connection rather than guess incorrectly.
+
+3. Comparison with Hill-Climbing (HC) This creates a distinct contrast with the previous Score-based results:
+
+    Hill-Climbing (Score-based): Was "Greedy." It found more true edges (TP=37 vs 27) but
+    dded significant noise (13 False Positives). It prioritizes maximizing a score, even at the cost of errors.
+
+    PC Algorithm (Constraint-based): Is "Cautious." It found fewer edges (TP=27), but made zero mistakes on the ones it found.
+    
+4. Imrpoving results 
+
+    We can imrpove the results by trying different parameters
+
+Conclusion The PC algorithm produced a sparse but highly reliable skeleton. While it yielded a slightly lower F-score (0.69) compared to Hill-Climbing (0.73) due to low Recall, it is arguably more valuable if the priority is avoiding false leads. In a practical scenario, this graph provides a set of 27 high-confidence connections, acknowledging that many weaker relationships remain undetected.
+
+
 ## 3.e Highlited the FP:
 in this algorithm we got 0 FP so there is nothing to highlight
 
 #4. Local search method (aracne)
+
+##4.a 
+
+```{r}
+res_aracne <- aracne(insurance)
+
+# 2. Check the class
+# Expected: "bn"
+class(res_aracne)
+
+# 3. View the content
+# Note: ARACNE returns an undirected graph (arcs will appear as A - B)
+print(res_aracne)
+```
+
+## 4.b 
+
+```{r}
+# 1. Get the adjacency matrix
+amat_aracne <- bnlearn::amat(res_aracne)
+
+# 2. Check the dimensions (should be 27x27)
+dim(amat_aracne)
+
+# 3. View the first few rows
+print(amat_aracne[1:7, 1:7])
+```
+
+## 4.c 
+
+```{r}
+library(igraph)
+
+# 1. Build the igraph object
+# We use mode = "directed" as requested, but since ARACNE is undirected, 
+# you will see bidirectional edges (or lines with no clear single direction).
+g_aracne <- graph_from_adjacency_matrix(amat_aracne, mode = "directed")
+
+# 2. Plotting
+plot(g_aracne, 
+     layout = layout_with_graphopt, 
+     main = "Reconstructed Network (ARACNE)",
+     
+     # Node styling
+     vertex.color = "lightyellow",     # Distinct color for ARACNE
+     vertex.frame.color = "orange",
+     vertex.size = 10,
+     vertex.label.cex = 0.7,
+     vertex.label.color = "black",
+     
+     # Edge styling
+     edge.arrow.size = 0.3,
+     edge.color = "gray40",
+     edge.curved = 0.1
+)
+```
+## 4.e 
+
+```{r}
+# --- PRE-PROCESSING: ALIGNMENT ---
+# Ensure rows/cols of the learned ARACNE matrix match the Ground Truth order
+amat_aracne <- amat_aracne[rownames(amat_true), colnames(amat_true)]
+
+# 1. Convert to Skeletons (Undirected)
+# Check if an edge exists in either direction.
+# Since ARACNE creates symmetric matrices, this just confirms it implies existence.
+skel_true   <- (amat_true + t(amat_true)) > 0
+skel_aracne <- (amat_aracne + t(amat_aracne)) > 0
+
+# 2. Select Upper Triangle
+# Only look at unique pairs to avoid double counting
+ut <- upper.tri(skel_true)
+
+# 3. Calculate Counts
+TP <- sum(skel_aracne[ut] & skel_true[ut])   # Edge in BOTH
+FP <- sum(skel_aracne[ut] & !skel_true[ut])  # Edge in ARACNE only
+FN <- sum(!skel_aracne[ut] & skel_true[ut])  # Edge in Truth only
+
+# 4. Compute Metrics (with safety checks)
+precision <- if((TP + FP) == 0) 0 else TP / (TP + FP)
+recall    <- if((TP + FN) == 0) 0 else TP / (TP + FN)
+fscore    <- if((precision + recall) == 0) 0 else 2 * (precision * recall) / (precision + recall)
+
+# 5. Print Results
+cat("====================================\n")
+cat("ARACNE: Skeleton Evaluation\n")
+cat("====================================\n")
+cat("True Positives (TP):", TP, "\n")
+cat("False Positives (FP):", FP, "\n")
+cat("False Negatives (FN):", FN, "\n")
+cat("----------------------------\n")
+cat("Precision:", round(precision, 4), "\n")
+cat("Recall:   ", round(recall, 4), "\n")
+cat("F-score:  ", round(fscore, 4), "\n")
+
+```
+
+## 5.e
+
+```{r}
+# 1. Define Edge Colors based on False Positives
+# We iterate through every edge in the ARACNE graph
+edge_list_aracne <- as_edgelist(g_aracne)
+
+# Initialize vectors for color and width
+edge_colors <- rep("gray50", nrow(edge_list_aracne))
+edge_widths <- rep(1, nrow(edge_list_aracne))
+
+# 2. Check each edge against the Ground Truth Skeleton
+for (i in 1:nrow(edge_list_aracne)) {
+  node_a <- edge_list_aracne[i, 1]
+  node_b <- edge_list_aracne[i, 2]
+  
+  # Check existence in Truth Skeleton (skel_true was created in the metrics step)
+  # If skel_true[node_a, node_b] is FALSE, it means this edge is a False Positive.
+  if (skel_true[node_a, node_b] == 0) {
+    edge_colors[i] <- "red"     # Highlight in Red
+    edge_widths[i] <- 2.5       # Make it thicker
+  }
+}
+
+# 3. Apply attributes to the graph
+E(g_aracne)$color <- edge_colors
+E(g_aracne)$width <- edge_widths
+
+# 4. Plot
+plot(g_aracne, 
+     layout = layout_with_graphopt, 
+     main = "ARACNE: False Positives (Red)",
+     
+     # Node styling
+     vertex.color = "lightyellow",
+     vertex.frame.color = "orange",
+     vertex.size = 10,
+     vertex.label.cex = 0.7,
+     vertex.label.color = "black",
+     
+     # Edge styling
+     # Note: ARACNE edges are undirected, so arrows might look bidirectional
+     edge.arrow.size = 0.3
+)
+
+# Legend
+legend("topleft", legend=c("Correct (TP)", "False Positive (FP)"), 
+       col=c("gray50", "red"), lty=1, lwd=c(1, 2.5), cex=0.8)
+```
+
 
 # 5. We Try to do the same analysis using miic and 3off2
 
